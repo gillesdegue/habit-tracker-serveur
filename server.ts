@@ -853,6 +853,12 @@ async function startServer(): Promise<void> {
           continue;
         }
 
+        const oldHabitResult = await client.query(
+          'SELECT name, frequency, notification_time FROM habits WHERE id = $1 AND user_id = $2',
+          [habit.id, userId]
+        );
+        const oldHabit = oldHabitResult.rows[0];
+
         await client.query(
           `INSERT INTO habits (id, user_id, name, description, frequency, schedule_days, notification_time, deadline, color, ai_personalized_reminders, ai_spontaneous_reminders, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
@@ -884,6 +890,22 @@ async function startServer(): Promise<void> {
             habit.createdAt ? new Date(String(habit.createdAt)) : new Date(),
           ]
         );
+
+        if (
+          oldHabit &&
+          (oldHabit.name !== habit.name ||
+            oldHabit.frequency !== habit.frequency ||
+            oldHabit.notification_time !== habit.notificationTime)
+        ) {
+          await client.query(
+            'DELETE FROM habit_ai_messages WHERE habit_id = $1 AND user_id = $2',
+            [habit.id, userId]
+          );
+          await client.query(
+            'DELETE FROM spontaneous_notifications WHERE habit_id = $1 AND user_id = $2',
+            [habit.id, userId]
+          );
+        }
       }
 
       for (const check of dailyChecks as Array<Record<string, unknown>>) {
