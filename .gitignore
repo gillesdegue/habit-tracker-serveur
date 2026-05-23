@@ -1,0 +1,6 @@
+node_modules/
+dist-server/
+.env
+data/
+*.log
+source_application_mobile/

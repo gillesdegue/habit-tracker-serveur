@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  habit-tracker-postgres:
+    image: postgres:15-alpine
+    container_name: habit-tracker-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - root_default
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  habit-tracker-api:
+    build: .
+    image: habit-tracker-api-image
+    container_name: habit-tracker-api
+    restart: unless-stopped
+    depends_on:
+      habit-tracker-postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: habit-tracker-postgres
+    networks:
+      - root_default
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.habit-tracker-api.rule=Host(`${TRAEFIK_HOST}`)'
+      - 'traefik.http.routers.habit-tracker-api.entrypoints=web,websecure'
+      - 'traefik.http.routers.habit-tracker-api.tls=true'
+      - 'traefik.http.routers.habit-tracker-api.tls.certresolver=mytlschallenge'
+      - 'traefik.http.services.habit-tracker-api.loadbalancer.server.port=3010'
+
+networks:
+  root_default:
+    external: true
