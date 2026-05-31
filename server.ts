@@ -185,6 +185,7 @@ async function initDb(): Promise<void> {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_spontaneous_enabled BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE habits ADD COLUMN IF NOT EXISTS ai_personalized_reminders BOOLEAN NOT NULL DEFAULT TRUE;
       ALTER TABLE habits ADD COLUMN IF NOT EXISTS ai_spontaneous_reminders BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE habits ADD COLUMN IF NOT EXISTS ai_reminder_frequency INTEGER NOT NULL DEFAULT 0;
     `);
 
     await client.query(`
@@ -272,7 +273,10 @@ function mapHabit(row: {
   created_at: string | Date;
   ai_personalized_reminders?: boolean | null;
   ai_spontaneous_reminders?: boolean | null;
+  ai_reminder_frequency?: number | null;
 }) {
+  const rawFrequency = Number(row.ai_reminder_frequency ?? 0);
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -286,6 +290,9 @@ function mapHabit(row: {
     createdAt: new Date(row.created_at).toISOString(),
     aiPersonalizedReminders: row.ai_personalized_reminders !== false,
     aiSpontaneousReminders: row.ai_spontaneous_reminders !== false,
+    aiReminderFrequency: Number.isFinite(rawFrequency)
+      ? Math.min(10, Math.max(0, Math.round(rawFrequency)))
+      : 0,
   };
 }
 
@@ -802,7 +809,7 @@ async function startServer(): Promise<void> {
           [userId]
         ),
         pool.query(
-          `SELECT id, user_id, name, description, frequency, schedule_days, notification_time, deadline, color, created_at, ai_personalized_reminders, ai_spontaneous_reminders
+          `SELECT id, user_id, name, description, frequency, schedule_days, notification_time, deadline, color, created_at, ai_personalized_reminders, ai_spontaneous_reminders, ai_reminder_frequency
            FROM habits WHERE user_id = $1 ORDER BY created_at DESC`,
           [userId]
         ),
@@ -854,14 +861,14 @@ async function startServer(): Promise<void> {
         }
 
         const oldHabitResult = await client.query(
-          'SELECT name, frequency, notification_time FROM habits WHERE id = $1 AND user_id = $2',
+          'SELECT name, frequency, notification_time, ai_reminder_frequency FROM habits WHERE id = $1 AND user_id = $2',
           [habit.id, userId]
         );
         const oldHabit = oldHabitResult.rows[0];
 
         await client.query(
-          `INSERT INTO habits (id, user_id, name, description, frequency, schedule_days, notification_time, deadline, color, ai_personalized_reminders, ai_spontaneous_reminders, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+          `INSERT INTO habits (id, user_id, name, description, frequency, schedule_days, notification_time, deadline, color, ai_personalized_reminders, ai_spontaneous_reminders, ai_reminder_frequency, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
            ON CONFLICT (id) DO UPDATE SET
              name = EXCLUDED.name,
              description = EXCLUDED.description,
@@ -872,6 +879,7 @@ async function startServer(): Promise<void> {
              color = EXCLUDED.color,
              ai_personalized_reminders = EXCLUDED.ai_personalized_reminders,
              ai_spontaneous_reminders = EXCLUDED.ai_spontaneous_reminders,
+             ai_reminder_frequency = EXCLUDED.ai_reminder_frequency,
              updated_at = NOW()`,
           [
             habit.id,
@@ -887,15 +895,28 @@ async function startServer(): Promise<void> {
             habit.color,
             habit.aiPersonalizedReminders !== false,
             habit.aiSpontaneousReminders !== false,
+            Math.min(
+              10,
+              Math.max(
+                0,
+                Math.round(Number(habit.aiReminderFrequency ?? 0))
+              )
+            ),
             habit.createdAt ? new Date(String(habit.createdAt)) : new Date(),
           ]
+        );
+
+        const nextFrequency = Math.min(
+          10,
+          Math.max(0, Math.round(Number(habit.aiReminderFrequency ?? 0)))
         );
 
         if (
           oldHabit &&
           (oldHabit.name !== habit.name ||
             oldHabit.frequency !== habit.frequency ||
-            oldHabit.notification_time !== habit.notificationTime)
+            oldHabit.notification_time !== habit.notificationTime ||
+            Number(oldHabit.ai_reminder_frequency ?? 0) !== nextFrequency)
         ) {
           await client.query(
             'DELETE FROM habit_ai_messages WHERE habit_id = $1 AND user_id = $2',
@@ -942,7 +963,7 @@ async function startServer(): Promise<void> {
 
       const [habitsResult, checksResult] = await Promise.all([
         pool.query(
-          `SELECT id, user_id, name, description, frequency, schedule_days, notification_time, deadline, color, created_at, ai_personalized_reminders, ai_spontaneous_reminders
+          `SELECT id, user_id, name, description, frequency, schedule_days, notification_time, deadline, color, created_at, ai_personalized_reminders, ai_spontaneous_reminders, ai_reminder_frequency
            FROM habits WHERE user_id = $1 ORDER BY created_at DESC`,
           [userId]
         ),

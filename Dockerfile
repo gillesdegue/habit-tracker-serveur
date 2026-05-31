@@ -2,7 +2,7 @@ FROM node:20-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
-COPY server.ts mailConfig.ts mailService.ts geminiService.ts quotesService.ts aiTypes.ts aiSettingsService.ts aiNotificationService.ts tsconfig.json ./
+COPY server.ts mailConfig.ts mailService.ts geminiService.ts habitAiFrequency.ts quotesService.ts aiTypes.ts aiSettingsService.ts aiNotificationService.ts tsconfig.json ./
 RUN npm run build
 
 FROM node:20-alpine
